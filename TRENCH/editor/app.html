@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TRENCH</title>
+<!-- the same icon the console window wears, straight from the shortcut's trench-4.ico -->
+<link rel="icon" href="trench-4.ico" sizes="any">
+<style>
+  /* A terminal: one monospace grid, the wordmark on top, settings as lines under it.
+     Text is a real bitmap font drawn into canvases, so it stays on the pixel grid. */
+  :root {
+    --lit:  #ff9a1e;
+    --hot:  #ffc46a;
+    --dim:  #9c560d;
+    --dead: #3a2005;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden;
+         user-select: none; -webkit-user-select: none; cursor: default; }
+  canvas { display: block; image-rendering: pixelated; }
+
+  #term { display: flex; flex-direction: column; }
+  /* the wordmark is typed out of '#' characters, like art in a terminal */
+  #logo { display: block; align-self: center; margin-bottom: var(--logogap); }
+
+  .line { position: relative; display: flex; }
+  .line.sel { background: var(--lit); }
+  .line.click { cursor: pointer; }
+  #status { margin-top: var(--gap); }
+  #status .bar { background: var(--dim); display: flex; }
+  #status .bar.hot { background: var(--lit); }
+</style>
+</head>
+<body>
+
+<div id="term">
+  <canvas id="logo" title="TRENCH"></canvas>
+  <div id="out"></div>
+  <div id="status"><div class="bar" id="bar"></div></div>
+</div>
+
+<div id="unlock" style="position:fixed;inset:0;z-index:9;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;cursor:pointer"></div>
+
+<script>
+// ===================================================================== bitmap font
+// Rasterised from Lucida Console at 11 px into an 8x10 cell and thresholded to one bit,
+// because Windows ships no pixel font. 95 glyphs, ASCII 32-126, 950 bytes.
+const FONT_B64 = 'AAAAAAAAAAAAAAAICAgICAAIAAAkJCQAAAAAAAAAAAoKPhR+KCgAAAgeKDgMCgo8CAAAIVJUKhUlQgAAABAoKDFJRj4AAAgICAAAAAAAAAAGCBAQEBAQEAgGMAgEBAQEBAQIMAAINhgUAAAAAAAAAAgIPggICAAAAAAAAAAADAwECAAAAAA+AAAAAAAAAAAAAAAYGAAAAQIGBAgIEDAgQAAcIiIiIiIcAAAAGCgICAgIPgAAADgEBAgQIDwAAAA8BAQYBAQ4AAAABAwUJD4EBAAAADwgIDgEBDgAAAAOECAsMiIcAAAAPgQECBAQIAAAABwiJBwiIhwAAAAcIiIeAgQ4AAAAABgYAAAYGAAAAAAYGAAAGBgIEAAAAgwwMAwCAAAAAAB/AH8AAAAAAABAMAwMMEAAAAA8IgIECAAIAAAAHiJOUl8gHAAAAAgUFCI+IkEAAAA8IiI8IiI8AAAAHiBAQEAgHgAAADwiIiIiIjwAAAA+ICA8ICA+AAAAPiAgPCAgIAAAAB4gQEZCIh4AAAAiIiI+IiIiAAAAPggICAgIPgAAABwEBAQEBDgAAAAiJCgwKCQiAAAAICAgICAgPgAAAGZmalpaUkIAAAAiMjoqJiYiAAAAPEJCQkJCPAAAADwiIjwgICAAAAA8QkJCQkI8BgMAeEREeEhEQgAAAB4gIBwCAjwAAAB/CAgICAgIAAAAIiIiIiIiHAAAAEEiIiIUFAgAAABBSUk1NiYiAAAAQSIUCBQiQQAAAEEiFAgICAgAAAB+AgQIECB+AAAcEBAQEBAQEBAcQCAgEAgIBAQCATgICAgICAgICDgICBQ2IkEAAAAAAAAAAAAAAAB/AAgAAAAAAAAAAAAAABwCHiIiHwAAICAsMiIiIjwAAAAAHiAgICAeAAACAh4iIiIiHgAAAAAcIj4gIB4AAAcIPwgICAgIAAAAAB4iIiIiHgIcICAuMiIiIiIAAAgAOAgICAgIAAAEABwEBAQEBAQ4ICAiJDgoJCIAADgICAgICAgIAAAAAFttSUlJSQAAAAAuMiIiIiIAAAAAHCIiIiIcAAAAACwyIiIiPCAgAAAeIiIiIh4CAgAALjIgICAgAAAAADwgMAwEOAAAABA+EBAQEA4AAAAAIiIiIiY6AAAAAEEiIhQUCAAAAABBSVVVNiIAAAAAQiQYGCRCAAAAAEEiIhQUCBhwAAA+AgQIED4AAAYICAgYCAgICAYICAgICAgICAgIMAgICAwICAgIOAAAAAA5TgAAAAA=';
+const FONT = atob(FONT_B64);
+const CW = 8, CH = 10;
+const DPR = Math.max(1, Math.round(window.devicePixelRatio || 1));
+const bits = (code, r) => { const i = (code - 32) * CH + r; return i >= 0 && i < FONT.length ? FONT.charCodeAt(i) : 0; };
+let Z = 2;                                   // pixel scale of one character cell
+function pxText(s, color, z = Z) {
+  s = String(s);
+  const c = document.createElement('canvas');
+  const w = s.length * CW * z, h = CH * z;
+  c.width = w * DPR; c.height = h * DPR;
+  c.style.width = w + 'px'; c.style.height = h + 'px';
+  const g = c.getContext('2d');
+  g.fillStyle = color;
+  const u = z * DPR;
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    for (let r = 0; r < CH; r++) {
+      const b = bits(code, r);
+      if (!b) continue;
+      for (let x = 0; x < CW; x++) if ((b >> (7 - x)) & 1) g.fillRect((i * CW + x) * u, r * u, u, u);
+    }
+  }
+  return c;
+}
+
+// ===================================================================== model
+const C = { lit:'#ff9a1e', hot:'#ffc46a', dim:'#9c560d', dead:'#3a2005', ink:'#000' };
+const COLS = 58;                              // terminal width, in characters
+const MODES = [['random','whole map'],['player','near me'],['bots','near bots'],['mixed','mixed']];
+// The three explosions testing turned up. The blast itself always goes off; this only says how
+// much of the trench zone's light is laid over it. 'off' is the bare blast, not nothing.
+const FLASH = ['off', 'trench', 'bright'];
+const flashLevel = () => Math.min(2, Math.max(0, Math.round(Number(S.artilleryFlash) || 0)));
+let S = {}, live = { inMatch:false, volume:{ fx:1, amb:1, master:1 } }, editedAt = 0;
+let PRESETS = [];                             // [{file, name}] as the server keeps them
+let naming = null;                            // the name being typed, or null when not naming
+let pendingDelete = null;                     // a preset awaiting a second delete press
+let presetIdx = -1;                           // -1 = none chosen yet, else index into PRESETS
+// The bitmap font is ASCII only: a name it cannot draw would be an invisible line.
+const presetName = p => (p.name.replace(/[^ -~]/g, '?').trim() || p.file);
+
+const step = (key, min, max, d = 1, unit = '') => ({ kind:'step', key, min, max, d, unit });
+const tog = key => ({ kind:'tog', key });
+// free: stays live while shelling is held. note: a line that only tells you something.
+const BASE_ROWS = [
+  { sec:'teams and match' },
+  { key:'your team',        c:step('myTeam', 1, 32),                  free:true },
+  { key:'enemy team',       c:step('enemyTeam', 0, 32),               free:true },
+  // PhaseConfig.PhaseDuration on the Team Deathmatch asset, 600 s as the game ships it.
+  { key:'match length',     c:step('matchMinutes', 1, 60, 1, ' min'), free:true },
+  { sec:'artillery' },
+  { key:'shelling',         c:tog('artillery'),                       free:true, master:true },
+  { key:'target',           c:{ kind:'cyc' } },
+  // the wait between salvos is a range the mod picks at random inside, so it gets a line
+  // each - one number per line is also the only way to see which of the two you are on
+  { key:'wait between salvos, min', c:step('artilleryMinDelay', 3, 600, 1, ' sec') },
+  { key:'wait between salvos, max', c:step('artilleryMaxDelay', 3, 600, 1, ' sec') },
+  { key:'shells per salvo, avg',    c:step('artilleryShells', 1, 30) },
+  { key:'spread',           c:step('artilleryMaxDist', 5, 300, 5, ' m') },
+  { key:'kill radius',      c:step('artilleryKillRadius', 0, 30, 1, ' m') },
+  { key:'can hit me',       c:tog('artilleryHitsMe') },
+  { key:'explosion light',  c:{ kind:'flash' } },
+  { sec:'background sound' },
+  { key:'war sound',        c:tog('ambience'),                        free:true },
+  // The mod's own keys, which work while you are in the game, not here. Paired up two to
+  // a line so the list does not eat the picture above it.
+  { sec:'keys in the game' },
+  { note:'f5 / f6',         val:'your team +1 / -1' },
+  { note:'f7 / f8',         val:'enemy team +1 / -1' },
+  { note:'f9',              val:'shelling on / off' },
+];
+// Presets sit above the key list: saved settings are something you act on, the keys are a note.
+function buildRows() {
+  const at = BASE_ROWS.findIndex(r => r.sec === 'keys in the game');
+  const mid = [{ sec:'presets' },
+    { key:'preset',          c:{ kind:'preset' }, free:true },
+    { key:'save current as', c:{ kind:'save' },   free:true }];
+  return BASE_ROWS.slice(0, at).concat(mid, BASE_ROWS.slice(at));
+}
+let ROWS = buildRows();
+const held = r => r.c && Number(S.artillery) !== 1 && !r.free;
+const pick = i => ROWS[i] && ROWS[i].c && !held(ROWS[i]);
+
+const $ = id => document.getElementById(id);
+const fmt = (v, d) => d < 1 ? Number(v).toFixed(1) : String(Math.round(v));
+function value(r) {
+  const c = r.c;
+  // Your team counts you, so 1 is its floor - spell that out, or it reads like a stuck minimum.
+  if (c.kind === 'step' && c.key === 'myTeam' && Number(S.myTeam) === 1) return '1, just you';
+  if (c.kind === 'step') return fmt(S[c.key], c.d) + c.unit;
+  if (c.kind === 'tog') return Number(S[c.key]) === 1 ? 'on' : 'off';
+  if (c.kind === 'flash') return FLASH[flashLevel()];
+  if (c.kind === 'preset') {
+    if (!PRESETS.length) return 'none saved';
+    if (presetIdx < 0) return 'none';
+    return (pendingDelete === PRESETS[presetIdx].file ? 'delete? ' : '') + presetName(PRESETS[presetIdx]);
+  }
+  if (c.kind === 'save') return 'press enter, type a name';
+  if (c.kind === 'cyc') return (MODES.find(m => m[0] === S.artilleryMode) || MODES[0])[1];
+  if (c.kind === 'range') return S.artilleryMinDelay + '-' + S.artilleryMaxDelay + ' s';
+  return '';
+}
+
+// ===================================================================== render
+let SEL = ROWS.findIndex(r => r.c);
+function leader(left, right) {                       // key ........ value, on the character grid
+  const room = COLS - 2 - left.length - right.length - 2;
+  return '  ' + left + ' ' + '.'.repeat(Math.max(1, room)) + ' ' + right;
+}
+function render() {
+  const out = $('out');
+  out.replaceChildren();
+  const add = (canvas, cls, i) => {
+    const d = document.createElement('div');
+    d.className = 'line' + (cls ? ' ' + cls : '');
+    if (i !== undefined) d.dataset.i = i;
+    d.appendChild(canvas);
+    out.appendChild(d);
+    return d;
+  };
+  add(pxText('bodycam trench 1.0 :: bots and artillery for your match'.padEnd(COLS), C.dim));
+  add(pxText('-'.repeat(COLS), C.dim));
+  add(pxText(''.padEnd(COLS), C.dim));        // air between the rule and the first section
+  ROWS.forEach((r, i) => {
+    if (r.sec) { add(pxText(('[' + r.sec + ']').padEnd(COLS), C.dim)); return; }
+    if (r.note) { add(pxText(leader(r.note, r.val).padEnd(COLS), C.dim)); return; }
+    const off = held(r);
+    const sel = i === SEL && !off;
+    const text = leader(r.key, value(r)).padEnd(COLS);
+    const ink = sel ? C.ink : off ? C.dead : (r.master && Number(S.artillery) !== 1) ? C.hot : C.lit;
+    add(pxText(text, ink), (sel ? 'sel ' : '') + (off ? '' : 'click'), i);
+  });
+  add(pxText(''.padEnd(COLS), C.dim));
+  bar();
+  if (GW && $('logo').width) drawScene();   // the readouts on the screen follow the settings
+}
+let msg = '', msgTimer = null;
+function bar() {
+  const keys = ' up/down move   left/right change   space toggle ';
+  const prompt = naming !== null ? ' name: ' + naming + '_' : null;
+  const text = (prompt || msg || keys).padEnd(COLS).slice(0, COLS);
+  $('bar').className = 'bar' + (prompt || msg ? ' hot' : '');
+  $('bar').replaceChildren(pxText(text, C.ink));
+}
+function flash(m) {
+  msg = ' ' + m;
+  clearTimeout(msgTimer);
+  msgTimer = setTimeout(() => { msg = ''; bar(); }, 4000);
+  bar();
+}
+
+// ===================================================================== editing
+function change(i, dir) {
+  const r = ROWS[i]; if (!r || !r.c || held(r)) return;
+  const c = r.c;
+  if (c.kind === 'preset') return stepPreset(dir);
+  if (c.kind === 'save') { naming = ''; bar(); return; }
+  if (c.kind === 'step') S[c.key] = Math.round(Math.min(c.max, Math.max(c.min, Number(S[c.key]) + dir * c.d)) * 10) / 10;
+  else if (c.kind === 'tog') S[c.key] = Number(S[c.key]) === 1 ? 0 : 1;
+  else if (c.kind === 'flash') S.artilleryFlash = (flashLevel() + dir + FLASH.length) % FLASH.length;
+  else if (c.kind === 'cyc') {
+    const k = MODES.findIndex(m => m[0] === S.artilleryMode);
+    S.artilleryMode = MODES[(k + dir + MODES.length) % MODES.length][0];
+  }
+  // the two ends of the wait are edited apart, so one must not overtake the other
+  if (c.key === 'artilleryMinDelay') S.artilleryMaxDelay = Math.max(S.artilleryMaxDelay, S.artilleryMinDelay);
+  if (c.key === 'artilleryMaxDelay') S.artilleryMinDelay = Math.min(S.artilleryMinDelay, S.artilleryMaxDelay);
+  if (c.kind === 'step' && c.key === 'artilleryMaxDist') S.artilleryMinDist = Math.round(S.artilleryMaxDist * 0.3);
+  if (c.key === 'artillery') flash(Number(S.artillery) === 1 ? 'shelling released' : 'shelling held');
+  editedAt = Date.now();
+  render(); saveSoon(); ambience();
+}
+function move(dir) {
+  let i = SEL;
+  for (let n = 0; n < ROWS.length; n++) {
+    i = (i + dir + ROWS.length) % ROWS.length;
+    if (pick(i)) { SEL = i; pendingDelete = null; render(); return; }
+  }
+}
+$('out').addEventListener('mousedown', e => {
+  const l = e.target.closest('.line'); if (!l || l.dataset.i === undefined) return;
+  e.preventDefault();
+  const i = Number(l.dataset.i);
+  if (!pick(i)) return;
+  SEL = i;
+  // the right third of the line steps up, the middle just selects, the left steps down
+  const x = e.clientX - l.getBoundingClientRect().left, w = l.offsetWidth;
+  if (x > w * 0.72) change(i, 1);
+  else if (x < w * 0.12) change(i, -1);
+  else render();
+});
+addEventListener('keydown', e => {
+  if (naming !== null) {
+    e.preventDefault();
+    if (e.key === 'Escape') { naming = null; bar(); }
+    else if (e.key === 'Enter') {
+      const n = naming.trim(); naming = null; bar();
+      if (n) presets({ action:'save', name:n }).then(() => flash('saved ' + n));
+    }
+    else if (e.key === 'Backspace') { naming = naming.slice(0, -1); bar(); }
+    // The font is ASCII only, so a character it cannot draw is simply not accepted.
+    else if (e.key.length === 1 && e.key.charCodeAt(0) >= 32 && e.key.charCodeAt(0) <= 126
+             && naming.length < 24) { naming += e.key; bar(); }
+    return;
+  }
+  if (e.key === 'Delete') { e.preventDefault(); askDelete(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); change(SEL, 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); change(SEL, -1); }
+  else if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    const c = ROWS[SEL] && ROWS[SEL].c;
+    if (!c) return;
+    if (c.kind === 'preset') { if (presetIdx < 0) stepPreset(1); else usePreset(PRESETS[presetIdx].file); }
+    else if (c.kind === 'save') { naming = ''; bar(); }
+    else if (c.kind === 'tog' || c.kind === 'flash') change(SEL, 1);
+  }
+});
+async function presets(cmd) {
+  const list = await (await fetch('/api/presets', { method:'POST', body:JSON.stringify(cmd) })).json();
+  setPresets(list);
+}
+function setPresets(list) {
+  PRESETS = list;
+  // The server says which one is remembered, so the line always shows what is actually on.
+  const marked = PRESETS.findIndex(p => p.last);
+  presetIdx = marked >= 0 ? marked : (presetIdx >= PRESETS.length ? PRESETS.length - 1 : presetIdx);
+  ROWS = buildRows();
+  if (!pick(SEL)) move(1);                    // a deleted row must not keep the cursor
+  render();
+}
+// Stepping is also choosing: the arrow moves to a preset and puts it on straight away.
+function stepPreset(dir) {
+  if (!PRESETS.length) return;
+  pendingDelete = null;
+  presetIdx = presetIdx < 0 ? (dir > 0 ? 0 : PRESETS.length - 1)
+                            : (presetIdx + dir + PRESETS.length) % PRESETS.length;
+  usePreset(PRESETS[presetIdx].file);
+}
+async function usePreset(file) {
+  const p = PRESETS.find(p => p.file === file);
+  await presets({ action:'load', file });
+  S = await (await fetch('/api/settings')).json();
+  pendingDelete = null;
+  render(); ambience();
+  flash('loaded ' + (p ? p.name : file));
+}
+// Two presses to delete, because there is no undo and the rows sit right next to each other.
+function askDelete() {
+  const r = ROWS[SEL];
+  if (!r || !r.c || r.c.kind !== 'preset') return;
+  if (presetIdx < 0 || !PRESETS[presetIdx]) { flash('step onto a preset first'); return; }
+  const p = PRESETS[presetIdx];
+  if (pendingDelete === p.file) {
+    pendingDelete = null;
+    presetIdx = -1;
+    presets({ action:'delete', file:p.file });
+    flash('deleted ' + presetName(p));
+    return;
+  }
+  pendingDelete = p.file;
+  render();
+  flash('press delete again to remove ' + presetName(p));
+}
+let saveTimer = null;
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => fetch('/api/settings', { method:'POST', body:JSON.stringify(S) }), 250);
+}
+
+// ===================================================================== sound
+// Whistles and the background war play here (WebAudio). Volume follows the game's own
+// settings: whistles = Master x Effects, background = Master x Ambient (sqrt = perceptual).
+const ctx = new AudioContext();
+const whistles = [];
+let ambSrc = null, ambGain = null, ambBuf = null, ambLoading = false;
+// Each clip is decoded on its own and the set is swapped in at the end. One clip failing to
+// decode used to throw out of the loop and leave whatever had been pushed before it - with the
+// first whistle in and the rest missing, every shell then came in on the same sound.
+async function loadClips() {
+  const list = await (await fetch('/api/clips')).json();
+  const want = list.filter(c => c.name.startsWith('whistle_'));
+  const loaded = [];
+  for (const c of want) {
+    try {
+      const buf = await ctx.decodeAudioData(await (await fetch('/sounds/' + c.name + '.wav?' + Date.now())).arrayBuffer());
+      loaded.push({ name: c.name, buf });
+    } catch (e) { console.warn('whistle did not load: ' + c.name, e); }
+  }
+  whistles.length = 0; whistles.push(...loaded);
+  bag.length = 0; lastWhistle = -1;
+  if (loaded.length < want.length) flash(loaded.length + ' of ' + want.length + ' whistles loaded');
+}
+// A shuffled bag: all three are played, in a random order, before any of them comes round
+// again. Picking at random each time let the same whistle land three shells running.
+function nextWhistle() {
+  if (!bag.length) {
+    for (let i = 0; i < whistles.length; i++) bag.push(i);
+    for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
+    if (bag.length > 1 && bag[0] === lastWhistle) bag.push(bag.shift());  // no repeat across the seam
+  }
+  lastWhistle = bag.shift();
+  return lastWhistle;
+}
+// Unreal (X forward, Y right, Z up, cm) -> WebAudio (x right, y up, -z forward, metres).
+const toAudio = (x, y, z) => [y / 100, z / 100, -x / 100];
+let poseSeen = false, lastWhistle = -1;
+const bag = [];                               // whistles still unplayed in this round
+function setListener(x, y, z, yaw, glide) {
+  const L = ctx.listener, [ax, ay, az] = toAudio(x, y, z), r = yaw * Math.PI / 180;
+  const fwd = toAudio(Math.cos(r) * 100, Math.sin(r) * 100, 0), t = ctx.currentTime, k = glide ? 0.05 : 0.001;
+  L.positionX.setTargetAtTime(ax, t, k); L.positionY.setTargetAtTime(ay, t, k); L.positionZ.setTargetAtTime(az, t, k);
+  L.forwardX.setTargetAtTime(fwd[0], t, k); L.forwardY.setTargetAtTime(0, t, k); L.forwardZ.setTargetAtTime(fwd[2], t, k);
+  L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+}
+// One incoming shell: a random whistle (never the same twice in a row, pitch varied +-8%)
+// placed at the landing point in 3D (HRTF), quieter and duller with distance.
+function incoming(e) {
+  if (Number(S.sound) !== 1 || !whistles.length) return;
+  if (!poseSeen) setListener(e.lx, e.ly, e.lz, e.yaw, false);
+  const w = whistles[nextWhistle()], rate = 0.92 + Math.random() * 0.16, len = w.buf.duration / rate;
+  const dist = Math.hypot(e.x - e.lx, e.y - e.ly, e.z - e.lz) / 100;
+  const src = ctx.createBufferSource(); src.buffer = w.buf; src.playbackRate.value = rate;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+  lp.frequency.value = Math.max(900, Math.min(20000, 20000 * Math.exp(-dist / 90)));
+  const g = ctx.createGain(); g.gain.value = 0.55 * Math.sqrt(live.volume.fx);
+  const [px, py, pz] = toAudio(e.x, e.y, e.z);
+  const p = new PannerNode(ctx, { panningModel: 'HRTF', distanceModel: 'inverse', refDistance: 8, rolloffFactor: 1.4,
+    maxDistance: 3000, positionX: px, positionY: py, positionZ: pz });
+  src.connect(lp).connect(g).connect(p).connect(ctx.destination);
+  const impact = ctx.currentTime + e.delay + Number(S.soundSync || 0), start = impact - len;
+  if (start >= ctx.currentTime) src.start(start); else src.start(ctx.currentTime, (ctx.currentTime - start) * rate);
+  const r = Math.atan2(e.y - e.ly, e.x - e.lx) - e.yaw * Math.PI / 180, side = Math.sin(r), front = Math.cos(r);
+  const dir = Math.abs(side) > 0.5 ? (side < 0 ? 'LEFT' : 'RIGHT') : (front >= 0 ? 'AHEAD' : 'BEHIND');
+  // the clip is named in the line so you can see from across the room that all three come up
+  flash('incoming ' + Math.round(dist) + ' m ' + dir.toLowerCase() + '   ' + w.name.replace('whistle_', 'whistle '));
+}
+async function ambience() {
+  const want = Number(S.ambience) === 1 && live.inMatch;
+  const target = want ? 0.6 * Math.sqrt(live.volume.amb) : 0;
+  if (target > 0 && !ambBuf && !ambLoading) {
+    ambLoading = true;
+    ambBuf = await ctx.decodeAudioData(await (await fetch('/sounds/ambience.mp3')).arrayBuffer());
+  }
+  if (target > 0 && ambBuf && !ambSrc) {
+    ambGain = ctx.createGain(); ambGain.gain.value = 0;
+    ambSrc = ctx.createBufferSource(); ambSrc.buffer = ambBuf; ambSrc.loop = true;
+    ambSrc.connect(ambGain).connect(ctx.destination); ambSrc.start();
+  }
+  if (ambGain) ambGain.gain.setTargetAtTime(target, ctx.currentTime, 0.7);
+}
+function unlockCheck() {
+  const show = ctx.state === 'suspended' && !location.search.includes('still');
+  $('unlock').style.display = show ? 'flex' : 'none';
+  if (show) $('unlock').replaceChildren(pxText('press anywhere to arm audio', C.hot, Z));
+}
+$('unlock').onclick = () => ctx.resume().then(unlockCheck);
+ctx.onstatechange = unlockCheck;
+
+// ===================================================================== link
+function connect() {
+  const es = new EventSource('/api/stream');
+  es.addEventListener('state', m => {
+    const was = live.inMatch;
+    live = JSON.parse(m.data); ambience();
+    if (GW && $('logo').width) drawScene();      // the 'in match' light is real
+    if (was !== live.inMatch) flash(live.inMatch ? 'MATCH DETECTED' : 'LEFT THE MATCH');
+  });
+  es.addEventListener('shell', m => incoming(JSON.parse(m.data)));
+  es.addEventListener('pose', m => { const p = JSON.parse(m.data); poseSeen = true; setListener(p.x, p.y, p.z, p.yaw, true); });
+  es.addEventListener('settings', m => {
+    if (Date.now() - editedAt < 1500) return;
+    S = JSON.parse(m.data); render(); ambience(); flash('settings changed in game');
+  });
+  es.addEventListener('clips', () => loadClips());
+  es.addEventListener('presets', m => setPresets(JSON.parse(m.data)));
+}
+
+
+
+// ===================================================================== wordmark
+// A corridor in one-point perspective, and a way through at the end of it with the name
+// standing in the opening. The light comes from there and nowhere else: the corridor
+// edges run from dark at the mouth to bright at the gate.
+//
+// It flies. The frames are not fixed to the walls - each one is at a depth that drops
+// with time, so it swells, sweeps past the eye and is replaced by a new one born at the
+// gate; the dust in the air travels the same way. The gate itself never gets closer,
+// which is what makes it a flight down a corridor rather than an arrival.
+//
+// Everything that does not move - the name, the gate, the instrument frame and its
+// readouts - is drawn once into two offscreen layers and stamped back each frame. Only
+// the frames and the dust are actually redrawn, so a header costs almost nothing.
+let GRID = [], GW = 0, GH = 0, LZ = 1;
+async function loadLogo() {
+  const text = await (await fetch('/logo.txt')).text();
+  GRID = text.split(/\r?\n/).filter(l => l.length);
+  GH = GRID.length; GW = Math.max(...GRID.map(r => r.length));
+  drawScene();
+}
+// The dust is scattered from a seeded stream, so it is the same flight every time.
+function rng(seed) {
+  return () => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const lerpRect = (a, b, t) => ({
+  x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t,
+  w: a.w + (b.w - a.w) * t, h: a.h + (b.h - a.h) * t,
+});
+
+let SCENE = null, anim = 0, flightFrom = 0;
+const STILL = location.search.includes('still');
+const SPEED = 0.26;                        // depths per second: a frame passes every ~0.8 s
+
+function drawScene(maxH) {
+  if (!GW) return;
+  const c = $('logo'), room = COLS * CW * Z;
+  LZ = Math.max(2, Math.floor(room * 0.66 / GW));
+  const lw = GW * LZ, lh = GH * LZ;
+  const pad = LZ * 3;
+  const W = room, H = Math.round(lh * 1.75);
+  c.width = W * DPR; c.height = H * DPR;
+  c.style.width = W + 'px'; c.style.height = H + 'px';
+
+  const wall = { x: Math.round((W - lw) / 2 - pad), y: Math.round((H - lh) / 2 - pad),
+                 w: lw + pad * 2, h: lh + pad * 2 };
+  const mouth = { x: 0, y: 0, w: W, h: H };
+  const cx = wall.x + wall.w / 2, cy = wall.y + wall.h / 2;
+
+  // ---- the two still layers
+  const layer = () => {
+    const l = document.createElement('canvas');
+    l.width = W * DPR; l.height = H * DPR;
+    const lg = l.getContext('2d');
+    lg.setTransform(DPR, 0, 0, DPR, 0, 0);
+    return [l, lg];
+  };
+  const [gateLayer, gg] = layer();
+  const [hudLayer, hg] = layer();
+  paintGate(gg, W, H, wall, lw, lh, LZ);
+  paintHud(hg, W, H, wall, cx, cy);
+
+  // ---- the dust: a point fixed in the corridor's cross-section, carried down it
+  const R = rng(9021), dust = [];
+  for (let i = 0; i < 110; i++) dust.push({ u: R(), v: R(), t: R() });
+
+  SCENE = { W, H, wall, mouth, cx, cy, gateLayer, hudLayer, dust, g: c.getContext('2d') };
+  SCENE.g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (!flightFrom) flightFrom = performance.now();
+  cancelAnimationFrame(anim);
+  frame(performance.now());
+}
+
+// the gate, and the name standing in it
+function paintGate(g, W, H, wall, lw, lh, LZ) {
+  const px = v => Math.round(v) + 0.5;
+  const rect = (r, style, w) => { g.strokeStyle = style; g.lineWidth = w || 1; g.strokeRect(px(r.x), px(r.y), Math.round(r.w), Math.round(r.h)); };
+  // One frame, and one bright reveal just inside it. Anything more piles up into mud at
+  // exactly the place the eye is meant to rest.
+  rect(wall, C.lit, 2);
+  const x0 = Math.round((W - lw) / 2), y0 = Math.round((H - lh) / 2), size = Math.max(1, LZ - 1);
+  for (let y = 0; y < GH; y++) {
+    const row = GRID[y];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== '#') continue;
+      const dx = (x / GW - 0.5) * 2, dy = (y / GH - 0.5) * 2;
+      const d = Math.min(1, Math.hypot(dx * 0.75, dy * 0.6));
+      g.fillStyle = d < 0.45 ? C.hot : d < 0.8 ? C.lit : C.dim;
+      g.fillRect(x0 + x * LZ, y0 + y * LZ, size, size);
+    }
+  }
+}
+
+// the instrument this is all seen through
+function paintHud(g, W, H, wall, cx, cy) {
+  const px = v => Math.round(v) + 0.5;
+  const rect = (r, style, w) => { g.strokeStyle = style; g.lineWidth = w || 1; g.strokeRect(px(r.x), px(r.y), Math.round(r.w), Math.round(r.h)); };
+  const line = (x1, y1, x2, y2, style, w) => {
+    g.strokeStyle = style; g.lineWidth = w || 1;
+    g.beginPath(); g.moveTo(px(x1), px(y1)); g.lineTo(px(x2), px(y2)); g.stroke();
+  };
+  const inset = 5;
+  rect({ x: inset, y: inset, w: W - inset * 2, h: H - inset * 2 }, C.dead);
+  const corner = Math.round(Math.min(W, H) * 0.06);
+  for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    const ax = sx > 0 ? inset : W - inset, ay = sy > 0 ? inset : H - inset;
+    line(ax, ay, ax + sx * corner, ay, C.dim, 2);
+    line(ax, ay, ax, ay + sy * corner, C.dim, 2);
+  }
+  for (let i = 0; i * 14 < W - inset * 2; i++) {
+    const x = inset + i * 14, big = i % 5 === 0;
+    line(x, inset, x, inset + (big ? 8 : 4), C.dead);
+    line(x, H - inset, x, H - inset - (big ? 8 : 4), C.dead);
+  }
+  for (let i = 0; i * 14 < H - inset * 2; i++) {
+    const y = inset + i * 14, big = i % 5 === 0;
+    line(inset, y, inset + (big ? 8 : 4), y, C.dead);
+    line(W - inset, y, W - inset - (big ? 8 : 4), y, C.dead);
+  }
+  const gapX = wall.w / 2 + 26, gapY = wall.h / 2 + 22;
+  line(inset + 10, cy, cx - gapX, cy, C.dim);
+  line(cx + gapX, cy, W - inset - 10, cy, C.dim);
+  line(cx, inset + 10, cx, cy - gapY, C.dim);
+  line(cx, cy + gapY, cx, H - inset - 10, C.dim);
+  for (const s of [-1, 1])
+    for (const k of [0.45, 0.62, 0.79]) {
+      const x = cx + s * (gapX + (W / 2 - gapX) * k);
+      line(x, cy - 4, x, cy + 4, C.dim);
+    }
+  const hold = Math.round(Math.min(wall.w, wall.h) * 0.2), off = 15;
+  for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+    const ax = sx > 0 ? wall.x - off : wall.x + wall.w + off;
+    const ay = sy > 0 ? wall.y - off : wall.y + wall.h + off;
+    line(ax, ay, ax + sx * hold, ay, C.hot, 2);
+    line(ax, ay, ax, ay + sy * hold, C.hot, 2);
+  }
+  const label = (s, x, y, colour, right) => {
+    const t = pxText(s, colour, 1);
+    g.drawImage(t, Math.round(right ? x - t.width / DPR : x), Math.round(y), t.width / DPR, t.height / DPR);
+  };
+  // Every corner says something true about the panel. The screen is the program's own
+  // instrument, so nothing on it is invented.
+  const firing = Number(S.artillery) === 1;
+  const mode = (MODES.find(m => m[0] === S.artilleryMode) || MODES[0])[1];
+  label('bodycam trench 1.0', inset + 14, inset + 13, C.dim);
+  label(live.inMatch ? 'in match' : 'standby', W - inset - 14, inset + 13, live.inMatch ? C.hot : C.dim, true);
+  label('bots ' + (S.myTeam || 0) + ' / ' + (S.enemyTeam || 0), inset + 14, H - inset - 23, C.dim);
+  label(firing ? 'shelling ' + mode : 'shelling held', W - inset - 14, H - inset - 23, firing ? C.hot : C.dim, true);
+}
+
+function frame(now) {
+  if (!SCENE) return;
+  const { W, H, wall, mouth, cx, cy, gateLayer, hudLayer, dust, g } = SCENE;
+  // ?still freezes the flight; ?still&phase=0.7 freezes it at a chosen point
+  const frozen = parseFloat(new URLSearchParams(location.search).get('phase'));
+  const phase = STILL ? (Number.isFinite(frozen) ? frozen : 0.35) : ((now - flightFrom) / 1000) * SPEED;
+  const px = v => Math.round(v) + 0.5;
+  g.clearRect(0, 0, W, H);
+
+  // the air around the gate carries a little of the light
+  const glow = g.createRadialGradient(cx, cy, Math.min(wall.w, wall.h) * 0.2, cx, cy, wall.w * 0.95);
+  glow.addColorStop(0, 'rgba(255,154,30,0.16)');
+  glow.addColorStop(0.45, 'rgba(255,154,30,0.06)');
+  glow.addColorStop(1, 'rgba(255,154,30,0)');
+  g.fillStyle = glow; g.fillRect(0, 0, W, H);
+
+  // corridor edges, dark at the mouth and bright where they arrive
+  const corners = [[0, 0, wall.x, wall.y], [W, 0, wall.x + wall.w, wall.y],
+                   [0, H, wall.x, wall.y + wall.h], [W, H, wall.x + wall.w, wall.y + wall.h]];
+  for (const [a, b, d, e] of corners) {
+    const gr = g.createLinearGradient(a, b, d, e);
+    gr.addColorStop(0, C.dead); gr.addColorStop(0.55, C.dead); gr.addColorStop(1, C.lit);
+    g.strokeStyle = gr; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(px(a), px(b)); g.lineTo(px(d), px(e)); g.stroke();
+  }
+
+  // The frames streaming past. Each is born on the gate itself and grows until it leaves
+  // the view behind the eye. It used to be skipped while it was still near the gate, so a
+  // frame popped into being a little way down the corridor instead of coming out of the
+  // opening; now it only fades - in as it leaves the gate, out as it sweeps past.
+  const N = 5;
+  for (let i = 0; i < N; i++) {
+    const t = (i / N + 1 - (phase % 1)) % 1;               // 1 at the gate, 0 at the mouth
+    const r = lerpRect(mouth, wall, t);
+    g.strokeStyle = t > 0.78 ? C.lit : t > 0.52 ? C.dim : C.dead;
+    g.lineWidth = t > 0.78 ? 2 : 1;
+    g.globalAlpha = Math.min(1, t * 4.5) * Math.min(1, (1 - t) / 0.07);
+    g.strokeRect(px(r.x), px(r.y), Math.round(r.w), Math.round(r.h));
+  }
+  g.globalAlpha = 1;
+
+  // light pooling on the floor and a weaker wash on the ceiling, each clipped to its plane
+  const spill = (yGate, yEdge, tone, n) => {
+    g.save();
+    g.beginPath();
+    g.moveTo(px(0), px(yEdge)); g.lineTo(px(W), px(yEdge));
+    g.lineTo(px(wall.x + wall.w), px(yGate)); g.lineTo(px(wall.x), px(yGate)); g.closePath();
+    g.clip();
+    for (let i = -n; i <= n; i++) {
+      if (!i) continue;
+      const fx = cx + i * (wall.w / (n * 2 + 1)), ex = cx + i * (W / (n + 1.5));
+      const gr = g.createLinearGradient(ex, yEdge, fx, yGate);
+      gr.addColorStop(0, 'rgba(255,154,30,0)'); gr.addColorStop(0.55, 'rgba(255,154,30,0)'); gr.addColorStop(1, tone);
+      g.strokeStyle = gr; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(px(fx), px(yGate)); g.lineTo(px(ex), px(yEdge)); g.stroke();
+    }
+    g.restore();
+  };
+  spill(wall.y + wall.h, H, C.dim, 4);
+  spill(wall.y, 0, C.dead, 4);
+
+  // dust, travelling with us
+  for (const d of dust) {
+    let t = (d.t - phase) % 1; if (t < 0) t += 1;
+    if (t > 0.96) continue;
+    const mx = d.u * W, my = d.v * H;
+    const x = mx + (wall.x + d.u * wall.w - mx) * t;
+    const y = my + (wall.y + d.v * wall.h - my) * t;
+    g.fillStyle = t > 0.8 ? C.hot : t > 0.55 ? C.lit : C.dim;
+    g.globalAlpha = Math.min(1, t * 3) * (0.25 + t * 0.75);
+    const s = t > 0.75 ? 2 : 1;
+    g.fillRect(Math.round(x), Math.round(y), s, s);
+  }
+  g.globalAlpha = 1;
+
+  g.drawImage(gateLayer, 0, 0, W, H);
+  g.drawImage(hudLayer, 0, 0, W, H);
+
+  if (!STILL && !document.hidden) anim = requestAnimationFrame(frame);
+}
+// nothing moves while the window is hidden; pick the flight up where it left off
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && SCENE && !STILL) { cancelAnimationFrame(anim); anim = requestAnimationFrame(frame); }
+});
+const sizeLogo = drawScene;
+
+
+// The terminal is a whole number of pixels wide, so the font never lands between pixels.
+// The window is pulled in to the panel, not the other way round: the app sits in a frame
+// exactly as big as it needs, with no field of black around it. Done once - resizing fires
+// another resize event, and chasing it would loop.
+const PAD_X = 44, PAD_Y = 56;              // black left of, right of and around the panel
+let hugged = false;
+function hug() {
+  if (hugged) return;
+  requestAnimationFrame(() => {
+    const t = $('term');
+    const w = Math.ceil(t.offsetWidth) + PAD_X * 2, h = Math.ceil(t.offsetHeight) + PAD_Y * 2;
+    if (h < 200) return;                  // nothing laid out yet
+    if (Math.abs(innerWidth - w) < 6 && Math.abs(innerHeight - h) < 6) { hugged = true; return; }
+    hugged = true;
+    try { resizeTo(w + (outerWidth - innerWidth), h + (outerHeight - innerHeight)); } catch (e) {}
+  });
+}
+function fit() {
+  const lines = ROWS.length + 4;
+  // Measured against the desktop, never against the window: the window is about to be
+  // pulled in to fit the result, so letting it vote would shrink the panel to nothing.
+  const availW = Math.max(innerWidth, screen.availWidth || 0) - PAD_X * 2 - 20;
+  const availH = Math.max(innerHeight, screen.availHeight || 0) - PAD_Y * 2 - 90;
+  for (const z of [4, 3, 2, 1]) {
+    const w = COLS * CW * z;
+    const logoH = GW ? Math.round(GH * Math.max(2, Math.floor(w * 0.66 / GW)) * 1.75) : w * 0.3;
+    const h = logoH + (lines + 1) * (CH * z + 2) + CH * z * 4 + 40;
+    if (w <= availW && h <= availH) { Z = z; break; }
+    Z = 1;
+  }
+  const t = $('term');
+  t.style.width = (COLS * CW * Z) + 'px';
+  t.style.setProperty('--gap', (CH * Z) + 'px');
+  t.style.setProperty('--logogap', (CH * Z * 3) + 'px');   // more air under the wordmark
+  sizeLogo();
+  render();
+  hug();
+}
+addEventListener('resize', fit);
+
+// ===================================================================== start
+(async () => {
+  S = await (await fetch('/api/settings')).json();
+  PRESETS = await (await fetch('/api/presets')).json();
+  presetIdx = PRESETS.findIndex(p => p.last);     // -1 when nothing was ever chosen
+  ROWS = buildRows();
+  await loadLogo();
+  fit();
+  connect(); unlockCheck();
+  await loadClips();
+})();
+</script>
+</body>
+</html>

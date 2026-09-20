@@ -1,0 +1,43 @@
+CREDITS
+
+
+THE ORIGINAL
+
+  TRENCH started from "BODYCAM-Game - Increase maximum limit of players" by
+  TRUEMODELOFTHEWORLD, released under the MIT License:
+
+      github.com/TRUEMODELOFTHEWORLD/BODYCAM-Game---Increase-maximum-limit-of-players
+
+  That mod solved the first hard part - getting a Bodycam host to accept more
+  players than the game allows, and filling the teams with bots - and it solved
+  it through reflection, without touching a single game file. Everything here is
+  built on that foundation. Thank you.
+
+
+WHAT WAS ADDED HERE
+
+  Artillery: salvos fired from off the map, whistling in over several seconds,
+  landing anywhere on the map, on the crowds, or on you. Damage through the
+  game's own effects.
+
+  The TRENCH panel: a control panel with its own sound engine, playing the
+  incoming shells in 3D around you and following where you stand and look.
+
+  Team sizes that hold for the whole match, match length, presets, an installer.
+
+
+THIRD PARTY
+
+  UE4SS (RE-UE4SS) - MIT License, Copyright (c) 2022 Narknon.
+  Not redistributed here: install it yourself before installing TRENCH.
+
+  Sounds in sounds\ - see the mod page for their origin.
+
+
+LICENCE
+
+  TRENCH is MIT, see LICENSE.
+
+  Code that came from somewhere else is listed in THIRD-PARTY.md with the
+  licence it arrived under - that is where the original notices live, which is
+  what those licences ask for.

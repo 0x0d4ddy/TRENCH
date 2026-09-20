@@ -1,0 +1,4 @@
+preset_1|Calm
+preset_2|Battlefield
+preset_3|Assault
+preset_4|Meat grinder

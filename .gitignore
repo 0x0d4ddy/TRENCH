@@ -1,0 +1,8 @@
+# runtime state the mod writes next to itself
+TRENCH/*.log
+TRENCH/*.log.1
+TRENCH/settings.ini
+TRENCH/match_state.txt
+TRENCH/pose.txt
+TRENCH/sound_events.txt
+TRENCH/presets/last.txt
