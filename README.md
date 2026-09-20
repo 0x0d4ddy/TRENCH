@@ -2,6 +2,8 @@
 
 **Bots and artillery for a Bodycam match you host.**
 
+[**Download on Nexus**](https://www.nexusmods.com/bodycam/mods/50) · [**Download here**](https://github.com/0x0d4ddy/TRENCH/releases/latest) · [**Watch it**](https://www.youtube.com/watch?v=iaDhKQUKufY)
+
 Bodycam is multiplayer only, and a lobby that does not fill is not a battle. TRENCH fills both
 teams with as many bots as you ask for and keeps them at that number for the whole match, then
 shells the ground they fight over.
