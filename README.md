@@ -12,21 +12,7 @@ shells the ground they fight over.
 
 ## What it does
 
-**Teams that hold.** The game caps a Team Deathmatch at ten players. TRENCH grows that cap as
-bots arrive and puts it back to stock when the match ends, so nothing is left changed behind
-you. Team sizes are held for the whole round: kill a bot and another takes its place.
-
-**Artillery.** A salvo is fired from off the map, whistles in over several seconds and lands
-where you told it to — anywhere on the map, on the crowds, or on you. The blast is built from
-the game's own effects, and anyone inside the kill radius dies to the game's own damage.
-
-**A panel with a sound engine.** The whistles play through a local page on your second screen,
-positioned in 3D around you and following where you stand and look, so a shell coming in from
-the left sounds like it is coming in from the left. Volume follows the game's own audio
-settings.
-
-**Match length and presets.** All the settings you need are in the TRENCH panel — it opens by
-itself when you start the game.
+This mod lets you add more than 10 bots to the game, as many as your PC can handle. It also lets you choose the match length, and adds artillery strikes with a ton of settings so you can tweak them however you like.
 
 ## Requirements
 
