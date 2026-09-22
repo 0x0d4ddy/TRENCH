@@ -262,6 +262,15 @@ log("Keys: F5/F6 your team +/-, F7/F8 enemy team +/-, F9 shelling on/off, Home b
 log("Config: " .. root .. "/config.json (player limit), settings.ini (teams, artillery, sound)")
 log("Team sizes are held by autofill; TDM capacity grows on demand and is restored when the match ends")
 
+-- The panel (and the shell sounds) come up with the game: editor\server.js in a minimised
+-- console. --from-game makes it quit quietly if a panel is already running, so a mod reload
+-- does not open a second one.
+do
+    local editor = (scripts:gsub("/[^/]+$", "") .. "/editor"):gsub("/", "\\")
+    local ok = os.execute('where node >nul 2>nul && start "TRENCH" /min /d "' .. editor .. '" node server.js --from-game')
+    log(ok and "Panel: started" or "Panel: not started - Node.js not found (https://nodejs.org)")
+end
+
 -- Feedback in the game's chat/event feed (if Bodycam shows ClientMessage) and in the log.
 local function notify(text)
     log(text)

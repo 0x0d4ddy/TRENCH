@@ -23,7 +23,7 @@ WHAT WAS ADDED HERE
   The TRENCH panel: a control panel with its own sound engine, playing the
   incoming shells in 3D around you and following where you stand and look.
 
-  Team sizes that hold for the whole match, match length, presets, an installer.
+  Team sizes that hold for the whole match, match length, presets.
 
 
 THIRD PARTY

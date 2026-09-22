@@ -43,7 +43,7 @@ SOFTWARE.
 ## RE-UE4SS
 
 Not shipped here. TRENCH is a UE4SS Lua mod and needs UE4SS installed in the
-game, but the installer does not bundle it — you download and install it
+game, but this download does not bundle it — you download and install it
 yourself, under its own licence.
 
 - Author: Narknon and contributors

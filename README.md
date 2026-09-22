@@ -25,32 +25,43 @@ positioned in 3D around you and following where you stand and look, so a shell c
 the left sounds like it is coming in from the left. Volume follows the game's own audio
 settings.
 
-**Match length, presets, and an installer.**
+**Match length and presets.** All the settings you need are in the TRENCH panel — it opens by
+itself when you start the game.
 
 ## Requirements
 
 - Bodycam on Steam
 - [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS/releases) — install it first, TRENCH is a UE4SS Lua mod
-- [Node.js](https://nodejs.org) — for the control panel; the mod itself runs without it
+- [Node.js](https://nodejs.org) (LTS) — runs the TRENCH panel and the shell sounds
 
 ## Install
 
-Download the release, unpack it, then right-click `install.ps1` and choose **Run with
-PowerShell**.
+1. Download the [latest release](https://github.com/0x0d4ddy/TRENCH/releases/latest) and unpack it.
+2. In Steam: right-click Bodycam > **Manage** > **Browse local files**, then open
+   `Bodycam\Binaries\Win64\ue4ss\Mods`.
+3. Copy the `TRENCH` folder from the archive into that Mods folder, so you end up with
+   `...\ue4ss\Mods\TRENCH\Scripts\main.lua`.
+4. Open `ue4ss\Mods\mods.txt` in Notepad and add the line `TRENCH : 1` (anywhere above the
+   Keybinds line).
 
-It finds Bodycam through Steam, copies the mod into `ue4ss\Mods\TRENCH`, switches it on in
-`mods.txt` and puts a TRENCH shortcut on your desktop. Installing over an older copy keeps your
-presets and settings. If the game is on another drive and is not found:
+Updating from an older copy: keep your `Mods\TRENCH\presets` folder and `settings.ini`, copy the
+new files over the rest. To remove it: delete `Mods\TRENCH` and the TRENCH line in `mods.txt`.
 
-```
-powershell -ExecutionPolicy Bypass -File install.ps1 -GamePath "D:\...\Bodycam\Binaries\Win64"
-```
+## Launch
 
-`uninstall.ps1` removes it again and copies your presets to the desktop first.
+Just start Bodycam from Steam. The TRENCH panel opens by itself as the game loads, with a
+minimised TRENCH console window on the taskbar next to it. **Leave both open while you play** —
+closing either one stops the panel and the shell sounds.
+
+Closed the panel by accident? Restart the game, or open the `Mods\TRENCH\editor` folder, type
+`cmd /k node server.js` in the address bar and press Enter.
+
+No panel at all? Node.js is not installed. `TRENCH.log` in the mod folder says `Panel: started`
+or why it was not.
 
 ## Using it
 
-Host a Team Deathmatch match, then open TRENCH from the desktop.
+Host a Team Deathmatch match.
 
 In the panel: up/down to move, left/right to change, space to toggle. On the preset line,
 left/right steps through your presets and applies them as you go; Delete twice removes one.

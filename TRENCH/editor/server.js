@@ -23,6 +23,7 @@ const PORT = 8765;
 const URL_ = `http://localhost:${PORT}`;
 const CLIP = /^(whistle|impact|fire)_\d+\.wav$/;
 const TITLE = 'TRENCH';
+const FROM_GAME = process.argv.includes('--from-game');
 
 // Same defaults as Scripts/features.lua; keys the page does not show are kept as they are.
 const DEFAULTS = {
@@ -209,7 +210,6 @@ const server = http.createServer(async (req, res) => {
   const url = decodeURIComponent(req.url.split('?')[0]);
   try {
     if (req.method === 'GET' && (url === '/' || url === '/app')) return send(res, 200, TYPES['.html'], fs.readFileSync(path.join(EDITOR, 'app.html')));
-    if (req.method === 'GET' && url === '/lab') return send(res, 200, TYPES['.html'], fs.readFileSync(path.join(EDITOR, 'logo-lab.html')));
     // the wordmark and the window icon, straight out of the editor folder
     if (req.method === 'GET' && /^\/[\w.-]+\.(svg|ico)$/.test(url)) {
       const file = path.join(EDITOR, path.basename(url));
@@ -291,6 +291,8 @@ function openApp(page = '/') {
 }
 
 server.on('error', e => {
+  // The mod starts this on every load (--from-game); a panel that is already open is left alone.
+  if (e.code === 'EADDRINUSE' && FROM_GAME) process.exit(0);
   if (e.code === 'EADDRINUSE') { banner(); info('already running — opening the panel'); openApp(); setTimeout(() => process.exit(0), 3000); }
   else fail(String(e.message || e));
 });
